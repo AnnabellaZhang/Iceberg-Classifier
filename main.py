@@ -1,11 +1,10 @@
 from __future__ import print_function, division
 # https://www.kaggle.com/yuhaichina/single-model-vgg16-mobilenet-lb-0-1568-with-tf
-
+import time
 # Global parameters
-needresize = False
-batch_size=64
+image_size = 224
+batch_size=16
 modelname = 'VGG16'
-currentdate = '0109'
 
 import numpy as np
 import pandas as pd
@@ -24,10 +23,12 @@ from mpl_toolkits.mplot3d import Axes3D
 
 # limit GPU usage
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-if not os.path.exists(modelname + "-" + currentdate):
-    print('Creating folder:' + modelname + "-" + currentdate)
-    os.makedirs(modelname + "-" + currentdate)
+# os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
+cur_time = time.strftime('%Y-%m-%d-%H-%M')
+if not os.path.exists(modelname + "-" + cur_time):
+    print('Creating folder:' + modelname + "-" + cur_time)
+    os.makedirs(modelname + "-" + cur_time)
 
 
 import tensorflow as tf
@@ -50,16 +51,15 @@ test['inc_angle']=pd.to_numeric(test['inc_angle'], errors='coerce')
 X_test_angle=test['inc_angle']
 
 #Generate the training data
-X_band_1=np.array([np.array(band).astype(np.float32).reshape(75, 75) for band in train["band_1"]])
-X_band_2=np.array([np.array(band).astype(np.float32).reshape(75, 75) for band in train["band_2"]])
-#X_band_3=(X_band_1+X_band_2)/2
-X_band_3=np.fabs(np.subtract(X_band_1,X_band_2))
-X_band_4=np.maximum(X_band_1,X_band_2)
-X_band_5=np.minimum(X_band_1,X_band_2)
+X_band_1 = np.array([np.array(band).astype(np.float32).reshape(75, 75) for band in train["band_1"]])
+X_band_2 = np.array([np.array(band).astype(np.float32).reshape(75, 75) for band in train["band_2"]])
+X_band_3_0 = (X_band_1+X_band_2)/2
+X_band_3 = np.fabs(np.subtract(X_band_1,X_band_2))
+X_band_4 = np.maximum(X_band_1,X_band_2)
+X_band_5 = np.minimum(X_band_1,X_band_2)
 #X_band_3=np.array([np.full((75, 75), angel).astype(np.float32) for angel in train["inc_angle"]])
 
-X_train = np.concatenate([
-                          
+X_train = np.concatenate([     
                           X_band_3[:, :, :, np.newaxis],X_band_4[:, :, :, np.newaxis],X_band_5[:, :, :, np.newaxis]], axis=-1)
 
 
@@ -68,7 +68,7 @@ X_band_test_1=np.array([np.array(band).astype(np.float32).reshape(75, 75) for ba
 X_band_test_2=np.array([np.array(band).astype(np.float32).reshape(75, 75) for band in test["band_2"]])
 
 
-#X_band_test_3=(X_band_test_1+X_band_test_2)/2
+X_band_test_3_0 = (X_band_test_1+X_band_test_2)/2
 X_band_test_3=np.fabs(np.subtract(X_band_test_1,X_band_test_2))
 X_band_test_4=np.maximum(X_band_test_1,X_band_test_2)
 X_band_test_5=np.minimum(X_band_test_1,X_band_test_2)
@@ -79,27 +79,33 @@ X_test = np.concatenate([
 
 from tqdm import tqdm
 from skimage.transform import resize
-if needresize:
-    width = 299
-    n = len(X_train)
-    X_train_resized = np.zeros((n, width, width, 3), dtype=np.float32)
-    for i in tqdm(range(n)):
-        x = X_train[i]
-        x = (x - x.min()) / (x.max() - x.min())  # normalize for each pseudo pixel value
-        X_train_resized[i] = resize(x, (299, 299), mode='reflect')
-    X_train = X_train_resized
-    n = len(X_test)
-    X_test_resized = np.zeros((n, width, width, 3), dtype=np.float32)
-    for i in tqdm(range(n)):
-        x = X_test[i]
-        x = (x - x.min()) / (x.max() - x.min())  # normalize for each pseudo pixel value
-        X_test_resized[i] = resize(x, (299, 299), mode='reflect')
-    X_test = X_test_resized
+import six.moves.cPickle as pickle
+if image_size != 75:
+    if os.path.exists('./data/X_train_{}.pkl'.format(image_size)) and os.path.exists('./data/X_test_{}.pkl'.format(image_size)):
+        print('load resized images...')
+        X_train = pickle.load(open('./data/X_train_{}.pkl'.format(image_size), 'rb'))
+        X_test = pickle.load(open('./data/X_test_{}.pkl'.format(image_size), 'rb'))
+    else:
+        print('resize images...')
+        width = image_size
+        n = len(X_train)
+        X_train_resized = np.zeros((n, width, width, 3), dtype=np.float32)
+        for i in tqdm(range(n)):
+            x = X_train[i]
+            x = (x - x.min()) / (x.max() - x.min())  # normalize for each pseudo pixel value
+            X_train_resized[i] = resize(x, (width, width), mode='reflect')
+        X_train = X_train_resized
+        n = len(X_test)
+        X_test_resized = np.zeros((n, width, width, 3), dtype=np.float32)
+        for i in tqdm(range(n)):
+            x = X_test[i]
+            x = (x - x.min()) / (x.max() - x.min())  # normalize for each pseudo pixel value
+            X_test_resized[i] = resize(x, (width, width), mode='reflect')
+        X_test = X_test_resized
+        pickle.dump(X_train, open('./data/X_train_{}.pkl'.format(image_size), 'wb'), 4)
+        pickle.dump(X_test, open('./data/X_test_{}.pkl'.format(image_size), 'wb'), 4)
 
 
-
-
-#Import Keras.
 #from matplotlib import pyplot
 from keras.optimizers import RMSprop
 from keras.preprocessing.image import ImageDataGenerator
@@ -133,11 +139,12 @@ from keras.preprocessing.image import ImageDataGenerator
 # Define the image transformations here
 gen = ImageDataGenerator(horizontal_flip = True,
                          vertical_flip = True,
-                         width_shift_range = 0.,
-                         height_shift_range = 0.,
+                         width_shift_range = 0.2, #0.,
+                         height_shift_range = 0.2, #0.,
                          channel_shift_range=0,
                          zoom_range = 0.5,
-                         rotation_range = 10)
+                         rotation_range = 30 #10
+                         )
 
 # Here is the function that merges our two generators
 # We use the exact same generator with the same random seed for both the y and angle arrays
@@ -194,7 +201,10 @@ def getVggAngleModel():
 
 
     x = GlobalMaxPooling2D()(x)
-    base_model2 = keras.applications.mobilenet.MobileNet(weights=None, alpha=0.9,input_tensor = base_model.input,include_top=False, input_shape=X_train.shape[1:])
+    # original: weights = None , alpha = 0.9
+    base_model2 = keras.applications.mobilenet.MobileNet(weights='imagenet', # None, 
+                         alpha=1.0, # 0.9, 
+                         input_tensor = base_model.input,include_top=False, input_shape=X_train.shape[1:])
     base_model2.get_layer('conv1').name = 'mb_conv1'
     x2 = base_model2.output
     x2 = GlobalAveragePooling2D()(x2)
@@ -233,7 +243,7 @@ def myAngleCV(X_train, X_angle, X_test):
         X_angle_hold=X_angle[test_idx]
 
         #define file path and get callbacks
-        file_path = modelname + "-" + currentdate + "/%s_aug_model_weights.hdf5"%j
+        file_path = modelname + "-" + cur_time + "/%s_aug_model_weights.hdf5"%j
         callbacks = get_callbacks(filepath=file_path, patience=10)
         gen_flow = gen_flow_for_two_inputs(X_train_cv, X_angle_cv, y_train_cv)
         galaxyModel= getVggAngleModel()
@@ -253,12 +263,12 @@ def myAngleCV(X_train, X_angle, X_test):
         galaxyModel.load_weights(filepath=file_path)
         #Getting Training Score
         score = galaxyModel.evaluate([X_train_cv,X_angle_cv], y_train_cv, verbose=0)
-        print('Train loss:', score[0])
-        print('Train accuracy:', score[1])
-        #Getting Test Score
+        print('fold {}, Train loss: {}'.format(j, score[0]))
+        print('fold {}, Train accuracy: {}'.format(j, score[1]))
+        #Getting val Score
         score = galaxyModel.evaluate([X_holdout,X_angle_hold], Y_holdout, verbose=0)
-        print('Test loss:', score[0])
-        print('Test accuracy:', score[1])
+        print('fold {}, Val loss: {}'.format(j, score[0]))
+        print('fold {}, Val accuracy: {}'.format(j, score[1]))
 
         #Getting validation Score.
         pred_valid=galaxyModel.predict([X_holdout,X_angle_hold])
@@ -276,7 +286,7 @@ def myAngleCV(X_train, X_angle, X_test):
     y_train_pred_log=y_train_pred_log/K
 
     print('\n Train Log Loss Validation= ',log_loss(target_train, y_train_pred_log))
-    print(' Test Log Loss Validation= ',log_loss(target_train, y_valid_pred_log))
+    print(' Val Log Loss Validation= ',log_loss(target_train, y_valid_pred_log))
     return y_test_pred_log
 
 preds=myAngleCV(X_train, X_angle, X_test)
@@ -284,4 +294,4 @@ preds=myAngleCV(X_train, X_angle, X_test)
 submission = pd.DataFrame()
 submission['id']=test['id']
 submission['is_iceberg']=preds
-submission.to_csv("sub-" + modelname + "-" + currentdate + ".csv", index=False)
+submission.to_csv("sub-" + modelname + "-" + cur_time + ".csv", index=False)
