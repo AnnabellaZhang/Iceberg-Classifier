@@ -1,12 +1,6 @@
 from __future__ import print_function, division
 # https://www.kaggle.com/yuhaichina/single-model-vgg16-mobilenet-lb-0-1568-with-tf
 
-# Global parameters
-needresize = False
-batch_size=64
-modelname = 'VGG16'
-currentdate = '0109'
-
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
@@ -14,7 +8,6 @@ from sklearn.metrics import log_loss
 from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 from os.path import join as opj
 import keras
-import math
 
 #from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -25,10 +18,6 @@ from mpl_toolkits.mplot3d import Axes3D
 # limit GPU usage
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-if not os.path.exists(modelname + "-" + currentdate):
-    print('Creating folder:' + modelname + "-" + currentdate)
-    os.makedirs(modelname + "-" + currentdate)
-
 
 import tensorflow as tf
 from keras.backend.tensorflow_backend import set_session
@@ -66,8 +55,6 @@ X_train = np.concatenate([
 
 X_band_test_1=np.array([np.array(band).astype(np.float32).reshape(75, 75) for band in test["band_1"]])
 X_band_test_2=np.array([np.array(band).astype(np.float32).reshape(75, 75) for band in test["band_2"]])
-
-
 #X_band_test_3=(X_band_test_1+X_band_test_2)/2
 X_band_test_3=np.fabs(np.subtract(X_band_test_1,X_band_test_2))
 X_band_test_4=np.maximum(X_band_test_1,X_band_test_2)
@@ -75,29 +62,6 @@ X_band_test_5=np.minimum(X_band_test_1,X_band_test_2)
 #X_band_test_3=np.array([np.full((75, 75), angel).astype(np.float32) for angel in test["inc_angle"]])
 X_test = np.concatenate([
                           X_band_test_3[:, :, :, np.newaxis], X_band_test_4[:, :, :, np.newaxis],X_band_test_5[:, :, :, np.newaxis]],axis=-1)
-
-
-from tqdm import tqdm
-from skimage.transform import resize
-if needresize:
-    width = 299
-    n = len(X_train)
-    X_train_resized = np.zeros((n, width, width, 3), dtype=np.float32)
-    for i in tqdm(range(n)):
-        x = X_train[i]
-        x = (x - x.min()) / (x.max() - x.min())  # normalize for each pseudo pixel value
-        X_train_resized[i] = resize(x, (299, 299), mode='reflect')
-    X_train = X_train_resized
-    n = len(X_test)
-    X_test_resized = np.zeros((n, width, width, 3), dtype=np.float32)
-    for i in tqdm(range(n)):
-        x = X_test[i]
-        x = (x - x.min()) / (x.max() - x.min())  # normalize for each pseudo pixel value
-        X_test_resized[i] = resize(x, (299, 299), mode='reflect')
-    X_test = X_test_resized
-
-
-
 
 #Import Keras.
 #from matplotlib import pyplot
@@ -123,13 +87,13 @@ from keras.applications.xception import Xception
 from keras.applications.mobilenet import MobileNet
 from keras.applications.vgg19 import VGG19
 from keras.applications.resnet50 import ResNet50
-from keras.applications.inception_v3 import  InceptionV3
 from keras.layers import Concatenate, Dense, LSTM, Input, concatenate
 from keras.preprocessing import image
 from keras.applications.vgg16 import preprocess_input    
 
 #Data Aug for multi-input
 from keras.preprocessing.image import ImageDataGenerator
+batch_size=64
 # Define the image transformations here
 gen = ImageDataGenerator(horizontal_flip = True,
                          vertical_flip = True,
@@ -160,45 +124,30 @@ def get_callbacks(filepath, patience=2):
 
 
 def getVggAngleModel():
-    print("Base Model:" + modelname)
-
     input_2 = Input(shape=[1], name="angle")
     angle_layer = Dense(1, )(input_2)
 
-    if modelname == "VGG16":
-        base_model = VGG16(weights='imagenet', include_top=False,
-                    input_shape=X_train.shape[1:], classes=1)
-        x = base_model.get_layer('block5_pool').output
-    elif modelname == "Xception":
-        base_model = Xception(include_top=False, weights='imagenet',
+    '''
+    # VGG16
+    base_model = VGG16(weights='imagenet', include_top=False, 
+                 input_shape=X_train.shape[1:], classes=1)
+    x = base_model.get_layer('block5_pool').output
+    # Xception
+    base_model = Xception(include_top=False, weights='imagenet',
                                     input_shape=X_train.shape[1:],classes=1)
-        x = base_model.output
-    elif modelname == "VGG19":
-        base_model = VGG19(include_top=False,weights='imagenet',
-                           input_shape=X_train.shape[1:],classes=1)
-        x = base_model.get_layer('block5_pool').output
+    x = base_model.output
+    
+    base_model = VGG19(include_top=False,weights='imagenet',input_shape=X_train.shape[1:],classes=1)
+    x = base_model.get_layer('block5_pool').output
+    '''
 
-    elif modelname == "ResNet50":
-        base_model = ResNet50(include_top=False, weights='imagenet', input_shape=X_train.shape[1:], classes=1)
-        x = base_model.get_layer('avg_pool').output
-
-    elif modelname == "InceptionV3":
-        base_model = InceptionV3(include_top=False,weights='imagenet',
-                                                input_shape=X_train.shape[1:],pooling=None,classes=1)
-        x = base_model.output
-    else:
-        print("BaseModel error, default VGG16")
-        base_model = VGG16(weights='imagenet', include_top=False,
-                           input_shape=X_train.shape[1:], classes=1)
-        x = base_model.get_layer('block5_pool').output
-
-
+    base_model = ResNet50(include_top=False, weights='imagenet', input_shape=X_train.shape[1:], classes=1)
+    x = base_model.get_layer('avg_pool').output
     x = GlobalMaxPooling2D()(x)
     base_model2 = keras.applications.mobilenet.MobileNet(weights=None, alpha=0.9,input_tensor = base_model.input,include_top=False, input_shape=X_train.shape[1:])
-    base_model2.get_layer('conv1').name = 'mb_conv1'
+
     x2 = base_model2.output
     x2 = GlobalAveragePooling2D()(x2)
-
 
     merge_one = concatenate([x, x2, angle_layer])
 
@@ -216,7 +165,7 @@ def getVggAngleModel():
 
 #Using K-fold Cross Validation with Data Augmentation.
 def myAngleCV(X_train, X_angle, X_test):
-    K = 5  # K-fold
+    K=5
     folds = list(StratifiedKFold(n_splits=K, shuffle=True, random_state=16).split(X_train, target_train))
     y_test_pred_log = 0
     y_train_pred_log=0
@@ -233,16 +182,13 @@ def myAngleCV(X_train, X_angle, X_test):
         X_angle_hold=X_angle[test_idx]
 
         #define file path and get callbacks
-        file_path = modelname + "-" + currentdate + "/%s_aug_model_weights.hdf5"%j
+        file_path = "%s_aug_model_weights.hdf5"%j
         callbacks = get_callbacks(filepath=file_path, patience=10)
         gen_flow = gen_flow_for_two_inputs(X_train_cv, X_angle_cv, y_train_cv)
         galaxyModel= getVggAngleModel()
-        print("N_train:" + str(len(X_train)))
-        print("Batch_size:" + str(batch_size))
-        print("Steps_per_epoch:" + str(math.ceil(len(X_train)/batch_size)))
         galaxyModel.fit_generator(
                 gen_flow,
-                steps_per_epoch=math.ceil(len(X_train)/batch_size),
+                steps_per_epoch=24,
                 epochs=100,
                 shuffle=True,
                 verbose=1,
@@ -284,4 +230,4 @@ preds=myAngleCV(X_train, X_angle, X_test)
 submission = pd.DataFrame()
 submission['id']=test['id']
 submission['is_iceberg']=preds
-submission.to_csv("sub-" + modelname + "-" + currentdate + ".csv", index=False)
+submission.to_csv('sub-resnet50.csv', index=False)

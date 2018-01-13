@@ -1,4 +1,5 @@
 run_exps*
+*.xlsx
 *.csv
 *.hdf5
 # IntelliJ project files
