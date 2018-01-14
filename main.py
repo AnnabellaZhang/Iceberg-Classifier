@@ -14,6 +14,7 @@ from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 from os.path import join as opj
 import keras
 import math
+from utils import create_logger
 
 #from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
@@ -25,10 +26,18 @@ from mpl_toolkits.mplot3d import Axes3D
 import os
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
+def print_and_log(string, logger):
+    print(string)
+    if logger:
+        logger.info(string)
+
 cur_time = time.strftime('%Y-%m-%d-%H-%M')
-if not os.path.exists(modelname + "-" + cur_time):
-    print('Creating folder:' + modelname + "-" + cur_time)
-    os.makedirs(modelname + "-" + cur_time)
+if not os.path.exists('output/' + modelname + "-" + cur_time):
+    exp_name = modelname + "-" + cur_time
+    out_path = 'output/' + modelname + "-" + cur_time
+    os.makedirs(out_path)
+    logger = create_logger('./{}/logs'.format(out_path), exp_name)
+    print_and_log('Creating folder: {}'.format(out_path), logger)
 
 
 import tensorflow as tf
@@ -82,11 +91,11 @@ from skimage.transform import resize
 import six.moves.cPickle as pickle
 if image_size != 75:
     if os.path.exists('./data/X_train_{}.pkl'.format(image_size)) and os.path.exists('./data/X_test_{}.pkl'.format(image_size)):
-        print('load resized images...')
+        print_and_log('load resized images...', logger)
         X_train = pickle.load(open('./data/X_train_{}.pkl'.format(image_size), 'rb'))
         X_test = pickle.load(open('./data/X_test_{}.pkl'.format(image_size), 'rb'))
     else:
-        print('resize images...')
+        print_and_logger('resize images...', logger)
         width = image_size
         n = len(X_train)
         X_train_resized = np.zeros((n, width, width, 3), dtype=np.float32)
@@ -167,7 +176,7 @@ def get_callbacks(filepath, patience=2):
 
 
 def getVggAngleModel():
-    print("Base Model:" + modelname)
+    print_and_log("Base Model: {}".format(modelname), logger)
 
     input_2 = Input(shape=[1], name="angle")
     angle_layer = Dense(1, )(input_2)
@@ -194,7 +203,7 @@ def getVggAngleModel():
                                                 input_shape=X_train.shape[1:],pooling=None,classes=1)
         x = base_model.output
     else:
-        print("BaseModel error, default VGG16")
+        print_and_log("BaseModel error, default VGG16", logger)
         base_model = VGG16(weights='imagenet', include_top=False,
                            input_shape=X_train.shape[1:], classes=1)
         x = base_model.get_layer('block5_pool').output
@@ -232,7 +241,7 @@ def myAngleCV(X_train, X_angle, X_test):
     y_train_pred_log=0
     y_valid_pred_log = 0.0*target_train
     for j, (train_idx, test_idx) in enumerate(folds):
-        print('\n===================FOLD=',j)
+        print_and_log('\n===================FOLD={}'.format(j), logger)
         X_train_cv = X_train[train_idx]
         y_train_cv = target_train[train_idx]
         X_holdout = X_train[test_idx]
@@ -247,9 +256,9 @@ def myAngleCV(X_train, X_angle, X_test):
         callbacks = get_callbacks(filepath=file_path, patience=10)
         gen_flow = gen_flow_for_two_inputs(X_train_cv, X_angle_cv, y_train_cv)
         galaxyModel= getVggAngleModel()
-        print("N_train:" + str(len(X_train)))
-        print("Batch_size:" + str(batch_size))
-        print("Steps_per_epoch:" + str(math.ceil(len(X_train)/batch_size)))
+        print_and_log("N_train: {}".format(len(X_train)), logger)
+        print_and_log("Batch_size: {}".format(batch_size), logger)
+        print_and_log("Steps_per_epoch: {}".format(math.ceil(len(X_train)/batch_size)), logger)
         galaxyModel.fit_generator(
                 gen_flow,
                 steps_per_epoch=math.ceil(len(X_train)/batch_size),
@@ -263,12 +272,12 @@ def myAngleCV(X_train, X_angle, X_test):
         galaxyModel.load_weights(filepath=file_path)
         #Getting Training Score
         score = galaxyModel.evaluate([X_train_cv,X_angle_cv], y_train_cv, verbose=0)
-        print('fold {}, Train loss: {}'.format(j, score[0]))
-        print('fold {}, Train accuracy: {}'.format(j, score[1]))
+        print_and_log('fold {}, Train loss: {}'.format(j, score[0]), logger)
+        print_and_log('fold {}, Train accuracy: {}'.format(j, score[1]), logger)
         #Getting val Score
         score = galaxyModel.evaluate([X_holdout,X_angle_hold], Y_holdout, verbose=0)
-        print('fold {}, Val loss: {}'.format(j, score[0]))
-        print('fold {}, Val accuracy: {}'.format(j, score[1]))
+        print_and_log('fold {}, Val loss: {}'.format(j, score[0]), logger)
+        print_and_log('fold {}, Val accuracy: {}'.format(j, score[1]), logger)
 
         #Getting validation Score.
         pred_valid=galaxyModel.predict([X_holdout,X_angle_hold])
@@ -285,8 +294,8 @@ def myAngleCV(X_train, X_angle, X_test):
     y_test_pred_log=y_test_pred_log/K
     y_train_pred_log=y_train_pred_log/K
 
-    print('\n Train Log Loss Validation= ',log_loss(target_train, y_train_pred_log))
-    print(' Val Log Loss Validation= ',log_loss(target_train, y_valid_pred_log))
+    print_and_log('\n Train Log Loss Validation= {}'.format(log_loss(target_train, y_train_pred_log)), logger)
+    print_and_log(' Val Log Loss Validation= {}'.format(log_loss(target_train, y_valid_pred_log)), logger)
     return y_test_pred_log
 
 preds=myAngleCV(X_train, X_angle, X_test)
