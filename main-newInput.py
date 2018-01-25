@@ -4,7 +4,8 @@ import time
 # Global parameters
 image_size = 299
 batch_size=16
-modelname = 'ResNet50+InceptionV3' # 'VGG16'
+modelname = 'ResNet50' # 'VGG16'
+model2weight = 'None'
 
 import numpy as np
 import pandas as pd
@@ -24,7 +25,7 @@ from mpl_toolkits.mplot3d import Axes3D
 
 # limit GPU usage
 import os
-#os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 def print_and_log(string, logger):
     print(string)
@@ -62,38 +63,47 @@ X_test_angle=test['inc_angle']
 #Generate the training data
 X_band_1 = np.array([np.array(band).astype(np.float32).reshape(75, 75) for band in train["band_1"]])
 X_band_2 = np.array([np.array(band).astype(np.float32).reshape(75, 75) for band in train["band_2"]])
-X_band_3_0 = (X_band_1+X_band_2)/2
-X_band_3 = np.fabs(np.subtract(X_band_1,X_band_2))
-X_band_4 = np.maximum(X_band_1,X_band_2)
-X_band_5 = np.minimum(X_band_1,X_band_2)
-#X_band_3=np.array([np.full((75, 75), angel).astype(np.float32) for angel in train["inc_angle"]])
-
+X_band_3 = (X_band_1+X_band_2)/2
 X_train = np.concatenate([     
-                          X_band_3[:, :, :, np.newaxis],X_band_4[:, :, :, np.newaxis],X_band_5[:, :, :, np.newaxis]], axis=-1)
+                          X_band_1[:, :, :, np.newaxis],X_band_2[:, :, :, np.newaxis],X_band_3[:, :, :, np.newaxis]], axis=-1)
 
 
 
 X_band_test_1=np.array([np.array(band).astype(np.float32).reshape(75, 75) for band in test["band_1"]])
 X_band_test_2=np.array([np.array(band).astype(np.float32).reshape(75, 75) for band in test["band_2"]])
-
-
-X_band_test_3_0 = (X_band_test_1+X_band_test_2)/2
-X_band_test_3=np.fabs(np.subtract(X_band_test_1,X_band_test_2))
-X_band_test_4=np.maximum(X_band_test_1,X_band_test_2)
-X_band_test_5=np.minimum(X_band_test_1,X_band_test_2)
-#X_band_test_3=np.array([np.full((75, 75), angel).astype(np.float32) for angel in test["inc_angle"]])
+X_band_test_3 = (X_band_test_1+X_band_test_2)/2
 X_test = np.concatenate([
-                          X_band_test_3[:, :, :, np.newaxis], X_band_test_4[:, :, :, np.newaxis],X_band_test_5[:, :, :, np.newaxis]],axis=-1)
+                          X_band_test_1[:, :, :, np.newaxis], X_band_test_2[:, :, :, np.newaxis],X_band_test_3[:, :, :, np.newaxis]],axis=-1)
 
+# creating size data
+def iso(arr):
+    p = np.reshape(np.array(arr), [75,75]) >(np.mean(np.array(arr))+2*np.std(np.array(arr)))
+    return p * np.reshape(np.array(arr), [75,75])
+def size(arr):
+    return float(np.sum(arr<-5))/(75*75)
+
+train['iso1'] = train.iloc[:, 0].apply(iso)
+train['iso2'] = train.iloc[:, 1].apply(iso)
+test['iso1'] = test.iloc[:, 0].apply(iso)
+test['iso2'] = test.iloc[:, 1].apply(iso)
+# Feature engineering s1 s2 and size.
+train['s1'] = train.iloc[:,5].apply(size)
+train['s2'] = train.iloc[:,6].apply(size)
+test['s1'] = test['iso1'].apply(size)
+test['s2'] = test['iso2'].apply(size)
+X_size_1=train['s1']
+X_size_2=train['s2']
+X_test_size1=test['s1']
+X_test_size2=test['s2']
 
 from tqdm import tqdm
 from skimage.transform import resize
 import six.moves.cPickle as pickle
 if image_size != 75:
-    if os.path.exists('./data/X_train_{}.pkl'.format(image_size)) and os.path.exists('./data/X_test_{}.pkl'.format(image_size)):
+    if os.path.exists('./data/X_new_train_{}.pkl'.format(image_size)) and os.path.exists('./data/X_new_test_{}.pkl'.format(image_size)):
         print_and_log('load resized images...', logger)
-        X_train = pickle.load(open('./data/X_train_{}.pkl'.format(image_size), 'rb'))
-        X_test = pickle.load(open('./data/X_test_{}.pkl'.format(image_size), 'rb'))
+        X_train = pickle.load(open('./data/X_new_train_{}.pkl'.format(image_size), 'rb'))
+        X_test = pickle.load(open('./data/X_new_test_{}.pkl'.format(image_size), 'rb'))
     else:
         print_and_log('resize images...', logger)
         width = image_size
@@ -111,8 +121,8 @@ if image_size != 75:
             x = (x - x.min()) / (x.max() - x.min())  # normalize for each pseudo pixel value
             X_test_resized[i] = resize(x, (width, width), mode='reflect')
         X_test = X_test_resized
-        pickle.dump(X_train, open('./data/X_train_{}.pkl'.format(image_size), 'wb'), 4)
-        pickle.dump(X_test, open('./data/X_test_{}.pkl'.format(image_size), 'wb'), 4)
+        pickle.dump(X_train, open('./data/X_new_train_{}.pkl'.format(image_size), 'wb'), 4)
+        pickle.dump(X_test, open('./data/X_new_test_{}.pkl'.format(image_size), 'wb'), 4)
 
 
 #from matplotlib import pyplot
@@ -157,15 +167,19 @@ gen = ImageDataGenerator(horizontal_flip = True,
 
 # Here is the function that merges our two generators
 # We use the exact same generator with the same random seed for both the y and angle arrays
-def gen_flow_for_two_inputs(X1, X2, y):
+def gen_flow_for_four_inputs(X1, X2,X3,X4, y):
     genX1 = gen.flow(X1,y,  batch_size=batch_size,seed=55) #creating batch data
     genX2 = gen.flow(X1,X2, batch_size=batch_size,seed=55)
+    genX3 = gen.flow(X1, X3, batch_size=batch_size, seed=55)
+    genX4 = gen.flow(X1, X4, batch_size=batch_size, seed=55)
     while True:
             X1i = genX1.next()
             X2i = genX2.next()
+            X3i = genX3.next()
+            X4i = genX4.next()
             #Assert arrays are equal - this was for peace of mind, but slows down training
             #np.testing.assert_array_equal(X1i[0],X2i[0])
-            yield [X1i[0], X2i[1]], X1i[1]
+            yield [X1i[0], X2i[1],X3i[1],X4i[1]], X1i[1]
 
 # Finally create generator
 def get_callbacks(filepath, patience=2):
@@ -181,60 +195,71 @@ def getVggAngleModel():
     input_2 = Input(shape=[1], name="angle")
     angle_layer = Dense(1, )(input_2)
 
-    with tf.device('/gpu:0'):
-        if modelname == "VGG16":
-            base_model = VGG16(weights='imagenet', include_top=False,
-                        input_shape=X_train.shape[1:], classes=1)
-            x = base_model.get_layer('block5_pool').output
-        elif modelname == "Xception":
-            base_model = Xception(include_top=False, weights='imagenet',
-                                        input_shape=X_train.shape[1:],classes=1)
-            x = base_model.output
-        elif modelname == "VGG19":
-            base_model = VGG19(include_top=False,weights='imagenet',
-                               input_shape=X_train.shape[1:],classes=1)
-            x = base_model.get_layer('block5_pool').output
+    input_3 = Input(shape=[1], name="s1")
+    s1_layer = Dense(1, )(input_3)
 
-        elif modelname == "ResNet50":
-            base_model = ResNet50(include_top=False, weights='imagenet', input_shape=X_train.shape[1:], classes=1)
-            x = base_model.get_layer('avg_pool').output
+    input_4 = Input(shape=[1], name="s2")
+    s2_layer = Dense(1, )(input_4)
 
-        elif modelname == "InceptionV3":
-            base_model = InceptionV3(include_top=False,weights='imagenet',
-                                                    input_shape=X_train.shape[1:],pooling=None,classes=1)
-            x = base_model.output
-        elif modelname == "ResNet50+InceptionV3":
-            base_model = ResNet50(include_top=False, weights='imagenet', input_shape=X_train.shape[1:], classes=1)
-            x = base_model.get_layer('avg_pool').output
-        else:
-            print_and_log("BaseModel error, default VGG16", logger)
-            base_model = VGG16(weights='imagenet', include_top=False,
-                               input_shape=X_train.shape[1:], classes=1)
-            x = base_model.get_layer('block5_pool').output
-        x = GlobalMaxPooling2D()(x)
+    if modelname == "VGG16":
+        base_model = VGG16(weights='imagenet', include_top=False,
+                    input_shape=X_train.shape[1:], classes=1)
+        x = base_model.get_layer('block5_pool').output
+    elif modelname == "Xception":
+        base_model = Xception(include_top=False, weights='imagenet',
+                                    input_shape=X_train.shape[1:],classes=1)
+        x = base_model.output
+    elif modelname == "VGG19":
+        base_model = VGG19(include_top=False,weights='imagenet',
+                           input_shape=X_train.shape[1:],classes=1)
+        x = base_model.get_layer('block5_pool').output
+
+    elif modelname == "ResNet50":
+        base_model = ResNet50(include_top=False, weights='imagenet', input_shape=X_train.shape[1:], classes=1)
+        x = base_model.get_layer('avg_pool').output
+
+    elif modelname == "InceptionV3":
+        base_model = InceptionV3(include_top=False,weights='imagenet',
+                                                input_shape=X_train.shape[1:],pooling=None,classes=1)
+        x = base_model.output
+    elif modelname == "ResNet50+InceptionV3":
+        base_model = ResNet50(include_top=False, weights='imagenet', input_shape=X_train.shape[1:], classes=1)
+        x = base_model.get_layer('avg_pool').output
+    else:
+        print_and_log("BaseModel error, default VGG16", logger)
+        base_model = VGG16(weights='imagenet', include_top=False,
+                           input_shape=X_train.shape[1:], classes=1)
+        x = base_model.get_layer('block5_pool').output
+    x = GlobalMaxPooling2D()(x)
 
     # original: weights = None , alpha = 0.9
-    with tf.device('/gpu:1'):
-        if modelname == "ResNet50+InceptionV3":
-            base_model2 = InceptionV3(include_top=False,weights='imagenet',
-                                                    input_tensor=base_model.input,pooling=None,classes=1)
-            x2 = base_model2.output
-        else:
-            print_and_log("BaseModel2 error, default MobileNet", logger)
+    if modelname == "ResNet50+InceptionV3":
+        base_model2 = InceptionV3(include_top=False,weights='imagenet',
+                                                input_tensor=base_model.input,pooling=None,classes=1)
+        x2 = base_model2.output
+    else:
+        print_and_log("BaseModel2 error, default MobileNet", logger)
+        if model2weight == 'imagenet':
+            print("Model2 weight:imagenet")
             base_model2 = keras.applications.mobilenet.MobileNet(weights='imagenet', # None,
-                                alpha=1.0, # 0.9,
+	                            alpha=1.0, # 0.9,
                                     input_tensor = base_model.input,include_top=False, input_shape=X_train.shape[1:])
-            base_model2.get_layer('conv1').name = 'mb_conv1'
-            x2 = base_model2.output
-        x2 = GlobalAveragePooling2D()(x2)
+        else:
+            print("Model2 weight: None")
+            base_model2 = keras.applications.mobilenet.MobileNet(weights= None,
+                                alpha=0.9,
+                                    input_tensor=base_model.input, include_top=False,input_shape=X_train.shape[1:])
+        base_model2.get_layer('conv1').name = 'mb_conv1'
+        x2 = base_model2.output
+    x2 = GlobalAveragePooling2D()(x2)
 
 
-    merge_one = concatenate([x, x2, angle_layer])
+    merge_one = concatenate([x, x2, angle_layer,s1_layer,s2_layer])
 
     merge_one = Dropout(0.6)(merge_one)
     predictions = Dense(1, activation='sigmoid',kernel_initializer='he_normal')(merge_one)
     
-    model = Model(input=[base_model.input, input_2], output=predictions)
+    model = Model(input=[base_model.input, input_2,input_3,input_4], output=predictions)
     
     sgd = Adam(lr=1e-4) #SGD(lr=1e-4, decay=1e-6, momentum=0.9, nesterov=True)
     model.compile(loss='binary_crossentropy',
@@ -244,8 +269,8 @@ def getVggAngleModel():
 
 
 #Using K-fold Cross Validation with Data Augmentation.
-def myAngleCV(X_train, X_angle, X_test):
-    K = 8  # K-fold
+def myAngleCV(X_train, X_angle,X_size_1,X_size_2, X_test):
+    K = 5  # K-fold
     folds = list(StratifiedKFold(n_splits=K, shuffle=True, random_state=16).split(X_train, target_train))
     y_test_pred_log = 0
     y_train_pred_log=0
@@ -261,10 +286,16 @@ def myAngleCV(X_train, X_angle, X_test):
         X_angle_cv=X_angle[train_idx]
         X_angle_hold=X_angle[test_idx]
 
+        #Size
+        X_size_1_cv = X_size_1[train_idx]
+        X_size_1_hold = X_size_1[test_idx]
+        X_size_2_cv = X_size_2[train_idx]
+        X_size_2_hold = X_size_2[test_idx]
+
         #define file path and get callbacks
         file_path = 'output/' + modelname + "-" + cur_time + "/%s_aug_model_weights.hdf5"%j
         callbacks = get_callbacks(filepath=file_path, patience=10)
-        gen_flow = gen_flow_for_two_inputs(X_train_cv, X_angle_cv, y_train_cv)
+        gen_flow = gen_flow_for_four_inputs(X_train_cv, X_angle_cv,X_size_1_cv,X_size_2_cv, y_train_cv)
         galaxyModel= getVggAngleModel()
         print_and_log("N_train: {}".format(len(X_train)), logger)
         print_and_log("Batch_size: {}".format(batch_size), logger)
@@ -275,30 +306,30 @@ def myAngleCV(X_train, X_angle, X_test):
                 epochs=100,
                 shuffle=True,
                 verbose=1,
-                validation_data=([X_holdout,X_angle_hold], Y_holdout),
+                validation_data=([X_holdout,X_angle_hold,X_size_1_hold,X_size_2_hold], Y_holdout),
                 callbacks=callbacks)
 
         #Getting the Best Model
         galaxyModel.load_weights(filepath=file_path)
         #Getting Training Score
-        score = galaxyModel.evaluate([X_train_cv,X_angle_cv], y_train_cv, verbose=0)
+        score = galaxyModel.evaluate([X_train_cv,X_angle_cv,X_size_1_cv,X_size_2_cv], y_train_cv, verbose=0)
         print_and_log('fold {}, Train loss: {}'.format(j, score[0]), logger)
         print_and_log('fold {}, Train accuracy: {}'.format(j, score[1]), logger)
         #Getting val Score
-        score = galaxyModel.evaluate([X_holdout,X_angle_hold], Y_holdout, verbose=0)
+        score = galaxyModel.evaluate([X_holdout,X_angle_hold,X_size_1_hold,X_size_2_hold], Y_holdout, verbose=0)
         print_and_log('fold {}, Val loss: {}'.format(j, score[0]), logger)
         print_and_log('fold {}, Val accuracy: {}'.format(j, score[1]), logger)
 
         #Getting validation Score.
-        pred_valid=galaxyModel.predict([X_holdout,X_angle_hold])
+        pred_valid=galaxyModel.predict([X_holdout,X_angle_hold,X_size_1_hold,X_size_2_hold])
         y_valid_pred_log[test_idx] = pred_valid.reshape(pred_valid.shape[0])
 
         #Getting Test Scores
-        temp_test=galaxyModel.predict([X_test, X_test_angle])
+        temp_test=galaxyModel.predict([X_test, X_test_angle,X_test_size1,X_test_size2])
         y_test_pred_log+=temp_test.reshape(temp_test.shape[0])
 
         #Getting Train Scores
-        temp_train=galaxyModel.predict([X_train, X_angle])
+        temp_train=galaxyModel.predict([X_train, X_angle,X_size_1,X_size_2])
         y_train_pred_log+=temp_train.reshape(temp_train.shape[0])
 
     y_test_pred_log=y_test_pred_log/K
@@ -308,9 +339,9 @@ def myAngleCV(X_train, X_angle, X_test):
     print_and_log(' Val Log Loss Validation= {}'.format(log_loss(target_train, y_valid_pred_log)), logger)
     return y_test_pred_log
 
-preds=myAngleCV(X_train, X_angle, X_test)
+preds=myAngleCV(X_train, X_angle,X_size_1,X_size_2, X_test)
 #Submission for each day.
 submission = pd.DataFrame()
 submission['id']=test['id']
 submission['is_iceberg']=preds
-submission.to_csv("sub-" + modelname + "-" + cur_time + ".csv", index=False)
+submission.to_csv("sub-new-" + modelname + "-" + cur_time + ".csv", index=False)

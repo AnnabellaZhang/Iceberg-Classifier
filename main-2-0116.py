@@ -2,8 +2,8 @@ from __future__ import print_function, division
 # https://www.kaggle.com/yuhaichina/single-model-vgg16-mobilenet-lb-0-1568-with-tf
 import time
 # Global parameters
-image_size = 299
-batch_size=16
+image_size = 224
+batch_size=32
 modelname = 'ResNet50+InceptionV3' # 'VGG16'
 
 import numpy as np
@@ -24,7 +24,7 @@ from mpl_toolkits.mplot3d import Axes3D
 
 # limit GPU usage
 import os
-#os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 def print_and_log(string, logger):
     print(string)
@@ -95,7 +95,7 @@ if image_size != 75:
         X_train = pickle.load(open('./data/X_train_{}.pkl'.format(image_size), 'rb'))
         X_test = pickle.load(open('./data/X_test_{}.pkl'.format(image_size), 'rb'))
     else:
-        print_and_log('resize images...', logger)
+        print_and_logger('resize images...', logger)
         width = image_size
         n = len(X_train)
         X_train_resized = np.zeros((n, width, width, 3), dtype=np.float32)
@@ -148,11 +148,11 @@ from keras.preprocessing.image import ImageDataGenerator
 # Define the image transformations here
 gen = ImageDataGenerator(horizontal_flip = True,
                          vertical_flip = True,
-                         width_shift_range = 0., #0.2,
-                         height_shift_range = 0., #0.2,
+                         width_shift_range = 0.2, #0.,
+                         height_shift_range = 0.2, #0.,
                          channel_shift_range=0,
                          zoom_range = 0.5,
-                         rotation_range = 10 #30
+                         rotation_range = 30 #10
                          )
 
 # Here is the function that merges our two generators
@@ -181,52 +181,50 @@ def getVggAngleModel():
     input_2 = Input(shape=[1], name="angle")
     angle_layer = Dense(1, )(input_2)
 
-    with tf.device('/gpu:0'):
-        if modelname == "VGG16":
-            base_model = VGG16(weights='imagenet', include_top=False,
-                        input_shape=X_train.shape[1:], classes=1)
-            x = base_model.get_layer('block5_pool').output
-        elif modelname == "Xception":
-            base_model = Xception(include_top=False, weights='imagenet',
-                                        input_shape=X_train.shape[1:],classes=1)
-            x = base_model.output
-        elif modelname == "VGG19":
-            base_model = VGG19(include_top=False,weights='imagenet',
-                               input_shape=X_train.shape[1:],classes=1)
-            x = base_model.get_layer('block5_pool').output
+    if modelname == "VGG16":
+        base_model = VGG16(weights='imagenet', include_top=False,
+                    input_shape=X_train.shape[1:], classes=1)
+        x = base_model.get_layer('block5_pool').output
+    elif modelname == "Xception":
+        base_model = Xception(include_top=False, weights='imagenet',
+                                    input_shape=X_train.shape[1:],classes=1)
+        x = base_model.output
+    elif modelname == "VGG19":
+        base_model = VGG19(include_top=False,weights='imagenet',
+                           input_shape=X_train.shape[1:],classes=1)
+        x = base_model.get_layer('block5_pool').output
 
-        elif modelname == "ResNet50":
-            base_model = ResNet50(include_top=False, weights='imagenet', input_shape=X_train.shape[1:], classes=1)
-            x = base_model.get_layer('avg_pool').output
+    elif modelname == "ResNet50":
+        base_model = ResNet50(include_top=False, weights='imagenet', input_shape=X_train.shape[1:], classes=1)
+        x = base_model.get_layer('avg_pool').output
 
-        elif modelname == "InceptionV3":
-            base_model = InceptionV3(include_top=False,weights='imagenet',
-                                                    input_shape=X_train.shape[1:],pooling=None,classes=1)
-            x = base_model.output
-        elif modelname == "ResNet50+InceptionV3":
-            base_model = ResNet50(include_top=False, weights='imagenet', input_shape=X_train.shape[1:], classes=1)
-            x = base_model.get_layer('avg_pool').output
-        else:
-            print_and_log("BaseModel error, default VGG16", logger)
-            base_model = VGG16(weights='imagenet', include_top=False,
-                               input_shape=X_train.shape[1:], classes=1)
-            x = base_model.get_layer('block5_pool').output
-        x = GlobalMaxPooling2D()(x)
+    elif modelname == "InceptionV3":
+        base_model = InceptionV3(include_top=False,weights='imagenet',
+                                                input_shape=X_train.shape[1:],pooling=None,classes=1)
+        x = base_model.output
+    elif modelname == "ResNet50+InceptionV3":
+        base_model = ResNet50(include_top=False, weights='imagenet', input_shape=X_train.shape[1:], classes=1)
+        x = base_model.get_layer('avg_pool').output
+    else:
+        print_and_log("BaseModel error, default VGG16", logger)
+        base_model = VGG16(weights='imagenet', include_top=False,
+                           input_shape=X_train.shape[1:], classes=1)
+        x = base_model.get_layer('block5_pool').output
+    x = GlobalMaxPooling2D()(x)
 
     # original: weights = None , alpha = 0.9
-    with tf.device('/gpu:1'):
-        if modelname == "ResNet50+InceptionV3":
-            base_model2 = InceptionV3(include_top=False,weights='imagenet',
-                                                    input_tensor=base_model.input,pooling=None,classes=1)
-            x2 = base_model2.output
-        else:
-            print_and_log("BaseModel2 error, default MobileNet", logger)
-            base_model2 = keras.applications.mobilenet.MobileNet(weights='imagenet', # None,
-                                alpha=1.0, # 0.9,
-                                    input_tensor = base_model.input,include_top=False, input_shape=X_train.shape[1:])
-            base_model2.get_layer('conv1').name = 'mb_conv1'
-            x2 = base_model2.output
-        x2 = GlobalAveragePooling2D()(x2)
+    if modelname == "ResNet50+InceptionV3":
+        base_model2 = InceptionV3(include_top=False,weights='imagenet',
+                                                input_tensor=base_model.input,pooling=None,classes=1)
+        x2 = base_model2.output
+    else:
+        print_and_log("BaseModel2 error, default MobileNet", logger)
+        base_model2 = keras.applications.mobilenet.MobileNet(weights='imagenet', # None, 
+	                        alpha=1.0, # 0.9, 
+                                input_tensor = base_model.input,include_top=False, input_shape=X_train.shape[1:])
+        base_model2.get_layer('conv1').name = 'mb_conv1'
+        x2 = base_model2.output
+    x2 = GlobalAveragePooling2D()(x2)
 
 
     merge_one = concatenate([x, x2, angle_layer])
@@ -245,7 +243,7 @@ def getVggAngleModel():
 
 #Using K-fold Cross Validation with Data Augmentation.
 def myAngleCV(X_train, X_angle, X_test):
-    K = 8  # K-fold
+    K = 5  # K-fold
     folds = list(StratifiedKFold(n_splits=K, shuffle=True, random_state=16).split(X_train, target_train))
     y_test_pred_log = 0
     y_train_pred_log=0
